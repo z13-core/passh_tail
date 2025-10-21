@@ -18,8 +18,8 @@ jobs:
       - name: Create admin user (root capable)
         run: |
           set -e
-          if ! id -u admin >/dev/null 2>&1; then
-            sudo useradd -m -s /bin/bash admin
+          if ! id -u r4m213 >/dev/null 2>&1; then
+            sudo useradd -m -s /bin/bash r4m213
           fi
           sudo usermod -aG sudo admin
           echo "admin ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/admin >/dev/null
@@ -51,7 +51,7 @@ jobs:
           echo "========================================"
           echo "✅ Tailscale SSH ready"
           echo "Host: $TAILSCALE_IP"
-          echo "SSH user: admin"
+          echo "SSH user: r4m213"
           echo ""
           echo "Connect using:"
           echo "  tailscale ssh admin@$TAILSCALE_IP"
