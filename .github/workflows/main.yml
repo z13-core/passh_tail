@@ -1,0 +1,86 @@
+name: PasSSH-Auto
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["PasSSH-Auto"]
+    types: [completed]
+
+jobs:
+  secure-ssh-root:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3550   # 59 jam - restart otomatis sebelum 60 jam batas maksimum
+
+    steps:
+      - name: Update & Install Tailscale
+        run: |
+          sudo apt update -y
+          sudo apt install -y curl
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Create admin user (root capable)
+        run: |
+          set -e
+          if ! id -u admin >/dev/null 2>&1; then
+            sudo useradd -m -s /bin/bash admin
+          fi
+          sudo usermod -aG sudo admin
+          echo "admin ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/admin >/dev/null
+          sudo chmod 440 /etc/sudoers.d/admin
+
+      - name: Start Tailscale (with SSH)
+        env:
+          TS_AUTH: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          set -e
+          sudo tailscale up --authkey="$TS_AUTH" --hostname=gh-auto-${{ github.run_id }} --ssh
+          
+          # Ambil IP Tailscale
+          TS_IP=""
+          for i in $(seq 1 15); do
+            TS_IP=$(tailscale ip -4 | head -n1 || true)
+            if [ -n "$TS_IP" ]; then
+              break
+            fi
+            sleep 3
+          done
+          if [ -z "$TS_IP" ]; then
+            echo "❌ Tailscale IP gagal diperoleh."
+            exit 1
+          fi
+          echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
+
+      - name: Display SSH info
+        run: |
+          echo "========================================"
+          echo "✅ Tailscale SSH ready"
+          echo "Host: $TAILSCALE_IP"
+          echo "SSH user: admin"
+          echo ""
+          echo "Connect using:"
+          echo "  tailscale ssh admin@$TAILSCALE_IP"
+          echo ""
+          echo "Then elevate to root:"
+          echo "  sudo -i"
+          echo "========================================"
+
+      - name: Keep Alive + Auto Extend
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # waktu hidup = 59 jam
+          EXTEND_AFTER=$((59 * 60 * 60 - 600)) # restart 10 menit sebelum batas
+          echo "Workflow akan auto-restart dalam $((EXTEND_AFTER/3600)) jam."
+          
+          SECONDS=0
+          while [ $SECONDS -lt $EXTEND_AFTER ]; do
+            echo "[$(date)] Workflow aktif - SSH tetap hidup"
+            sleep 300
+          done
+
+          echo "[$(date)] ⏳ Memulai workflow baru untuk memperpanjang sesi..."
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/pas-ssh-auto.yml/dispatches \
+            -d '{"ref":"${{ github.ref_name }}"}'
