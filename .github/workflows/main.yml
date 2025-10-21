@@ -1,15 +1,12 @@
-name: PasSSH-Auto
+name: PasSSH
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["PasSSH-Auto"]
-    types: [completed]
 
 jobs:
   secure-ssh-root:
     runs-on: ubuntu-latest
-    timeout-minutes: 3550   # 59 jam - restart otomatis sebelum 60 jam batas maksimum
+    timeout-minutes: 3550   # ~59 jam
 
     steps:
       - name: Update & Install Tailscale
@@ -35,7 +32,6 @@ jobs:
           set -e
           sudo tailscale up --authkey="$TS_AUTH" --hostname=gh-auto-${{ github.run_id }} --ssh
           
-          # Ambil IP Tailscale
           TS_IP=""
           for i in $(seq 1 15); do
             TS_IP=$(tailscale ip -4 | head -n1 || true)
@@ -45,7 +41,7 @@ jobs:
             sleep 3
           done
           if [ -z "$TS_IP" ]; then
-            echo "❌ Tailscale IP gagal diperoleh."
+            echo "❌ Gagal mendapatkan IP Tailscale"
             exit 1
           fi
           echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
@@ -64,23 +60,23 @@ jobs:
           echo "  sudo -i"
           echo "========================================"
 
-      - name: Keep Alive + Auto Extend
+      - name: Keep Alive + Trigger Restart
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # waktu hidup = 59 jam
-          EXTEND_AFTER=$((59 * 60 * 60 - 600)) # restart 10 menit sebelum batas
-          echo "Workflow akan auto-restart dalam $((EXTEND_AFTER/3600)) jam."
-          
+          # Restart otomatis sebelum batas waktu GitHub habis
+          EXTEND_AFTER=$((59 * 60 * 60 - 600))
+          echo "Menunggu $((EXTEND_AFTER/3600)) jam sebelum auto-restart..."
+
           SECONDS=0
           while [ $SECONDS -lt $EXTEND_AFTER ]; do
-            echo "[$(date)] Workflow aktif - SSH tetap hidup"
+            echo "[$(date)] Workflow masih aktif..."
             sleep 300
           done
 
-          echo "[$(date)] ⏳ Memulai workflow baru untuk memperpanjang sesi..."
+          echo "[$(date)] ⏳ Memicu workflow 'PasSSH-Restart'..."
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/pas-ssh-auto.yml/dispatches \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/pas-ssh-restart.yml/dispatches \
             -d '{"ref":"${{ github.ref_name }}"}'
